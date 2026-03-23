@@ -38,6 +38,21 @@ function screenshotsForEntry(
 // 1.  Weekly Report
 // ---------------------------------------------------------------------------
 
+async function imageUrlToBase64(url: string): Promise<string | null> {
+  try {
+    const response = await fetch(url);
+    const blob = await response.blob();
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onloadend = () => resolve(reader.result as string);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 export async function generateWeeklyReport(
   client: Client,
   entries: TimeEntry[],
@@ -58,14 +73,14 @@ export async function generateWeeklyReport(
   // --- Header ---
   doc.setFontSize(18);
   doc.setFont("helvetica", "bold");
-  doc.text("dental::21 \u2014 Wochenreport", margin, y);
+  doc.text("dental::21 — Wochenreport", margin, y);
   y += 10;
 
   doc.setFontSize(12);
   doc.setFont("helvetica", "normal");
   doc.text(`Mandant: ${client.name}`, margin, y);
   y += 6;
-  doc.text(`KW ${kw}, ${weekStartStr} \u2013 ${weekEndStr}`, margin, y);
+  doc.text(`KW ${kw}, ${weekStartStr} – ${weekEndStr}`, margin, y);
   y += 10;
 
   // Divider
@@ -73,6 +88,14 @@ export async function generateWeeklyReport(
   doc.setLineWidth(0.5);
   doc.line(margin, y, pageWidth - margin, y);
   y += 8;
+
+  // --- Helper: check page break ---
+  const ensureSpace = (needed: number) => {
+    if (y + needed > 280) {
+      doc.addPage();
+      y = margin;
+    }
+  };
 
   // --- Entries grouped by date ---
   const grouped = groupEntriesByDate(entries);
@@ -84,10 +107,7 @@ export async function generateWeeklyReport(
     const dayDate = new Date(dateStr);
     const dayLabel = format(dayDate, "EEEE, dd.MM.yyyy", { locale: de });
 
-    if (y > 260) {
-      doc.addPage();
-      y = margin;
-    }
+    ensureSpace(20);
 
     doc.setFontSize(11);
     doc.setFont("helvetica", "bold");
@@ -99,11 +119,16 @@ export async function generateWeeklyReport(
 
     let dayMinutes = 0;
 
+    // Collect all screenshots for this day
+    const dayScreenshots: Screenshot[] = [];
+
     for (const entry of dayEntries) {
+      ensureSpace(12);
+
       const start = entry.start_time.substring(0, 5);
       const end = entry.end_time.substring(0, 5);
       const duration = minutesToHours(entry.duration_minutes);
-      const line = `${start} \u2013 ${end}  (${duration} h)`;
+      const line = `${start} – ${end}  (${duration} h)`;
       doc.text(line, margin + 4, y);
 
       if (entry.notes) {
@@ -116,40 +141,81 @@ export async function generateWeeklyReport(
       dayMinutes += entry.duration_minutes;
       y += 5;
 
-      // Screenshots info
+      // Gather screenshots for this entry
       const entryScreenshots = screenshotsForEntry(screenshots, entry.id);
-      if (entryScreenshots.length > 0) {
-        doc.setFontSize(9);
-        doc.setTextColor(100, 100, 100);
-        doc.text(
-          `${entryScreenshots.length} Screenshot${entryScreenshots.length > 1 ? "s" : ""}`,
-          margin + 8,
-          y
-        );
-        doc.setTextColor(0, 0, 0);
-        doc.setFontSize(10);
-        y += 5;
-      }
-
-      if (y > 270) {
-        doc.addPage();
-        y = margin;
-      }
+      dayScreenshots.push(...entryScreenshots);
     }
 
     // Day subtotal
+    ensureSpace(10);
     doc.setFont("helvetica", "bold");
     doc.text(`Tagesgesamt: ${minutesToHours(dayMinutes)} h`, margin + 4, y);
     doc.setFont("helvetica", "normal");
     totalMinutes += dayMinutes;
     y += 8;
+
+    // --- Screenshots for this day ---
+    if (dayScreenshots.length > 0) {
+      const imgWidth = 80;
+      const imgHeight = 45; // ~16:9 aspect ratio
+      const captionHeight = 12; // space for comment + timestamp below image
+      const blockHeight = imgHeight + captionHeight;
+
+      for (const screenshot of dayScreenshots) {
+        ensureSpace(blockHeight + 4);
+
+        const base64data = await imageUrlToBase64(screenshot.image_url);
+
+        if (base64data) {
+          try {
+            doc.addImage(base64data, "JPEG", margin, y, imgWidth, imgHeight);
+          } catch {
+            // If image fails to add, show placeholder text
+            doc.setFontSize(9);
+            doc.setTextColor(150, 150, 150);
+            doc.text("[Screenshot konnte nicht geladen werden]", margin, y + 4);
+            doc.setTextColor(0, 0, 0);
+          }
+        } else {
+          doc.setFontSize(9);
+          doc.setTextColor(150, 150, 150);
+          doc.text("[Screenshot konnte nicht geladen werden]", margin, y + 4);
+          doc.setTextColor(0, 0, 0);
+        }
+
+        y += imgHeight + 2;
+
+        // Comment (if any)
+        if (screenshot.comment) {
+          doc.setFontSize(9);
+          doc.setFont("helvetica", "italic");
+          doc.setTextColor(100, 100, 100);
+          const commentLines = doc.splitTextToSize(screenshot.comment, imgWidth);
+          doc.text(commentLines, margin, y);
+          y += commentLines.length * 4;
+          doc.setFont("helvetica", "normal");
+          doc.setTextColor(0, 0, 0);
+        }
+
+        // Timestamp
+        const capturedDate = new Date(screenshot.captured_at);
+        const timestampStr = format(capturedDate, "dd.MM.yyyy, HH:mm", {
+          locale: de,
+        });
+        doc.setFontSize(8);
+        doc.setTextColor(120, 120, 120);
+        doc.text(`${timestampStr} Uhr`, margin, y);
+        doc.setTextColor(0, 0, 0);
+        doc.setFontSize(10);
+        y += 6;
+      }
+
+      y += 4;
+    }
   }
 
   // --- Footer ---
-  if (y > 250) {
-    doc.addPage();
-    y = margin;
-  }
+  ensureSpace(30);
 
   doc.setDrawColor(0);
   doc.setLineWidth(0.5);
@@ -171,7 +237,7 @@ export async function generateWeeklyReport(
   );
 
   // Save
-  const safeClientName = client.name.replace(/[^a-zA-Z0-9\u00e4\u00f6\u00fc\u00c4\u00d6\u00dc\u00df]/g, "_");
+  const safeClientName = client.name.replace(/[^a-zA-Z0-9äöüÄÖÜß]/g, "_");
   const filename = `Wochenreport_${safeClientName}_KW${kw.toString().padStart(2, "0")}.pdf`;
   doc.save(filename);
 }
