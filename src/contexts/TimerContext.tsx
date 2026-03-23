@@ -39,10 +39,10 @@ const TimerContext = createContext<TimerContextType | undefined>(undefined)
 const getDisplayMediaOptions = (): DisplayMediaStreamOptions => ({
   video: {
     displaySurface: 'monitor',
-    // @ts-expect-error vendor-specific constraint
+    // @ts-ignore vendor-specific constraint
     cursor: 'always',
   } as any,
-  // @ts-expect-error vendor-specific constraints
+  // @ts-ignore vendor-specific constraints
   preferCurrentTab: false,
   selfBrowserSurface: 'exclude',
   monitorTypeSurfaces: 'include',
@@ -106,8 +106,8 @@ export function TimerProvider({ children }: { children: ReactNode }) {
     try {
       let bitmap: ImageBitmap
       try {
-        const capture = new ImageCapture(track)
-        bitmap = await capture.grabFrame()
+        const capture = new (window as any).ImageCapture(track)
+        bitmap = await (capture as any).grabFrame()
       } catch {
         const video = document.createElement("video")
         video.srcObject = currentStream
