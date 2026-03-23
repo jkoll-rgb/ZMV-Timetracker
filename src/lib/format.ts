@@ -67,7 +67,7 @@ export function groupEntriesByDay(
     })
 
     const clientGroups = Array.from(byClient.entries()).map(([clientId, cEntries]) => {
-      const client = clients.find(c => c.id === clientId)!
+      const client = clients.find(c => c.id === clientId) || { id: clientId, name: "Unbekannter Kunde", address: null, contact: null, contract_hours_per_week: 0, hourly_rate: 0, extra_hourly_rate: 0, notes: null, created_at: "" } as Client
       const entryIds = new Set(cEntries.map(e => e.id))
       const cScreenshots = screenshots.filter(s => entryIds.has(s.time_entry_id))
       const totalMinutes = cEntries.reduce((sum, e) => sum + e.duration_minutes, 0)
